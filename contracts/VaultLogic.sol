@@ -1,61 +1,78 @@
-Mapping from address to token balance
-    mapping(address => uint256) private balances;
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
 
-    Events
-    event Transfer(address indexed from, address indexed to, uint256 value);
-    event Approval(address indexed owner, address indexed spender, uint256 value);
+/**
+ * @title VaultLogic
+ * @dev Basic ETH vault using withdrawal (pull) pattern for safety
+ * @notice Users deposit ETH and later withdraw their own balance
+ */
+contract VaultLogic {
+    address public owner;
+
+    // user => deposited balance
+    mapping(address => uint256) public balances;
+
+    uint256 public totalDeposits;
+    uint256 public totalWithdrawn;
+
+    event Deposited(address indexed user, uint256 amount, uint256 timestamp);
+    event Withdrawn(address indexed user, uint256 amount, uint256 timestamp);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
-    Returns balance of given account
-    function balanceOf(address account) public view returns (uint256) {
-        return balances[account];
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner");
+        _;
     }
 
-    Approve spender to spend tokens on owner's behalf
-    function approve(address spender, uint256 amount) public returns (bool) {
-        require(spender != address(0), "Approve to zero address");
-
-        allowances[msg.sender][spender] = amount;
-        emit Approval(msg.sender, spender, amount);
-        return true;
+    constructor() {
+        owner = msg.sender;
     }
 
-    Transfer tokens from one address to another using allowance mechanism
-    function transferFrom(address sender, address recipient, uint256 amount) public returns (bool) {
-        require(sender != address(0), "Transfer from zero address");
-        require(recipient != address(0), "Transfer to zero address");
-        require(balances[sender] >= amount, "Insufficient balance");
-        require(allowances[sender][msg.sender] >= amount, "Allowance exceeded");
+    /**
+     * @dev Deposit ETH into the vault
+     */
+    function deposit() external payable {
+        require(msg.value > 0, "Amount = 0");
 
-        balances[sender] -= amount;
-        balances[recipient] += amount;
-        allowances[sender][msg.sender] -= amount;
+        balances[msg.sender] += msg.value;
+        totalDeposits += msg.value;
 
-        emit Transfer(sender, recipient, amount);
-        return true;
+        emit Deposited(msg.sender, msg.value, block.timestamp);
     }
 
-    Owner can burn tokens from an account
-    function burn(address account, uint256 amount) external onlyOwner {
-        require(account != address(0), "Burn from zero address");
-        uint256 burnAmount = amount * 10**decimals;
-        require(balances[account] >= burnAmount, "Burn amount exceeds balance");
+    /**
+     * @dev Withdraw caller's available balance (full or partial)
+     * @param amount Amount to withdraw
+     */
+    function withdraw(uint256 amount) external {
+        require(amount > 0, "Amount = 0");
+        uint256 bal = balances[msg.sender];
+        require(bal >= amount, "Insufficient balance");
 
-        balances[account] -= burnAmount;
-        totalSupply -= burnAmount;
+        // effects first (withdrawal pattern)
+        balances[msg.sender] = bal - amount;
+        totalWithdrawn += amount;
 
-        emit Transfer(account, address(0), burnAmount);
+        (bool ok, ) = payable(msg.sender).call{value: amount}("");
+        require(ok, "Transfer failed");
+
+        emit Withdrawn(msg.sender, amount, block.timestamp);
     }
 
-    End
-End
-End
-End
-End
-End
-End
-End
-// 
-// 
-End
-// 
+    /**
+     * @dev Get contract ETH balance
+     */
+    function getContractBalance() external view returns (uint256) {
+        return address(this).balance;
+    }
+
+    /**
+     * @dev Transfer ownership of the vault contract
+     */
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "Zero address");
+        address prev = owner;
+        owner = newOwner;
+        emit OwnershipTransferred(prev, newOwner);
+    }
+}
